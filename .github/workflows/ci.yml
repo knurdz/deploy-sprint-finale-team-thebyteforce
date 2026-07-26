@@ -35,6 +35,10 @@ jobs:
           # bundle, so this must come from a repository variable and never from
           # a secret. Private values are supplied to deploy steps instead.
           VITE_PUBLIC_DEPLOY_LABEL: ${{ vars.PUBLIC_DEPLOY_LABEL }}
+          # T07 - server-side only. The key is used at build time by
+          # scripts/generate-weather.mjs and never shipped to the browser.
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+          OPENWEATHER_CITY: Colombo
         run: npm run build
         working-directory: team-site
 
