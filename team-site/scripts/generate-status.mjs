@@ -36,6 +36,29 @@ const commit = env('GITHUB_SHA') || 'local-build';
 const runId = env('GITHUB_RUN_ID') || 'local';
 const builtAt = new Date().toISOString();
 
+/**
+ * T05 - Secret And Config Separation
+ *
+ * Public config may reach the browser; private config may not. `/status` is
+ * served to anyone, so it reports secrets by NAME and never by value: the
+ * presence of a name proves the value is configured without disclosing it.
+ *
+ * The distinction is enforced by Vite, not by convention: any variable named
+ * VITE_* is inlined into the client bundle at build time and is readable by
+ * every visitor. Private values are therefore never given a VITE_ prefix and
+ * are only read inside Actions/deploy steps.
+ */
+const publicDeployLabel = env('VITE_PUBLIC_DEPLOY_LABEL', 'PUBLIC_DEPLOY_LABEL');
+
+// Names only. Every value below is a GitHub Secret consumed by deploy logic and
+// must never appear in source, the client bundle, /status, or unmasked logs.
+const secretsRedacted = [
+  'PRIVATE_DEPLOY_TOKEN',
+  'DEPLOYER_DISPATCH_TOKEN',
+  'DNS_PORTAL_PASSWORD',
+  'DNS_TXT_VALUE',
+];
+
 const status = {
   ok: true,
   task: TASK,
@@ -52,6 +75,12 @@ const status = {
   endpoints: {
     health: '/health',
     status: '/status',
+  },
+  config: {
+    publicDeployLabel: publicDeployLabel || 'not-configured',
+    publicUrlConfigured: Boolean(env('VITE_PUBLIC_URL', 'PUBLIC_URL', 'IP_PUBLIC_URL')),
+    secretsRedacted,
+    secretValuesInClientBundle: false,
   },
 };
 
