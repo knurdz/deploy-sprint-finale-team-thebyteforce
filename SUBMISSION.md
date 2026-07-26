@@ -2,7 +2,9 @@
 
 Complete this file on `main` as tasks are completed. Do not paste secrets, private keys, token values, or screenshots that reveal credentials.
 
-## Te- Team name: The Byte Force
+## Team
+
+- Team name: The Byte Force
 - Team members: Nuwan Dhananjaya, Himeth Walgampaya, Achintha Rukshan
 - Live IP URL: http://4.155.210.79
 - Assigned domain URL: https://thebyteforce.deploysprint-finals.knurdz.org
@@ -28,12 +30,12 @@ Use this section for short public notes and links. Full task instructions and ch
 
 | Task | PR | Evidence | Notes |
 | --- | --- | --- | --- |
-| T01 | `task/T01-launch-provided-website` | http://4.155.210.79/status | `/health` and `/status` generated at build time; `/status` carries commit, release ID and deploy time |
-| T02 |  |  | Blocked on an organizer-side DNS portal error; see Public Notes |
-| T03 | `task/T03-build-once-deploy-same-artifact` | CI run > `Dry-run deploy from built artifact` job | Deploy consumes `site-dist-<sha>` downloaded from CI; no rebuild, identity recorded in `release-manifest.json` |
-| T04 | `task/T04-rollback-to-known-good-release` | Actions > `Rollback To Known-Good Release` | Manual `workflow_dispatch` rollback with a required `release_ref`, sharing the deploy concurrency lock |
-| T05 |  |  |  |
-| T06 |  |  |  |
+| T01 | `task/T01-launch-provided-website` | http://4.155.210.79/status | Site live on the assigned VPS via Actions only; `/health` and `/status` generated at build time |
+| T02 |  |  | DNS records created; HTTPS pending, see Public Notes |
+| T03 | `task/T03-build-once-deploy-same-artifact` | CI run > `Dry-run deploy from built artifact` | CI artifact `site-dist-<sha>` uploaded once and consumed without rebuilding |
+| T04 | `task/T04-rollback-to-known-good-release` | Actions > `Rollback To Known-Good Release` | Manual `workflow_dispatch` redeploy of a known-good `release_ref` |
+| T05 | `task/T05-secret-and-config-separation` | CI run + repository settings | Public deploy label kept as configuration; private token kept as a GitHub Secret |
+| T06 | `task/T06-ci-gate-before-deployment` | CI run > `Build gate` job summary | CI gate on PRs and main: lockfile install, build, output verification, artifact upload |
 | T07 |  |  |  |
 | T08 |  |  |  |
 | T09 |  |  |  |
@@ -61,67 +63,44 @@ Use this section for short public notes and links. Full task instructions and ch
 
 ## Public Notes
 
+Nothing below exposes credentials or private infrastructure details.
+
 ### T01 - Launch Provided Website
 
 The provided `team-site/` app is built and published to the assigned VPS through
-GitHub Actions only. No team member has SSH access to the server.
+GitHub Actions only. No team member has SSH access to the server, and no team
+member holds the deploy key.
 
-- `team-site/scripts/generate-status.mjs` writes `/health` and `/status` into the
-  build output as a `postbuild` step, so the endpoints are regenerated on every
-  build instead of being committed as static files that could go stale.
-- `/status` reports team, commit SHA, release ID, build and deploy time, public
-  URL and the `T01` marker, taken from the Actions environment at build time.
-- `ci.yml` passes the commit SHA, run ID and team slug into the build from
-  repository variables.
-- A release badge in the sidebar shows team identity and the short commit.
+How a change reaches production:
 
-Verify: `http://4.155.210.79/` returns 200, `/health` returns `ok`, and
-`/status` reports a `commit` matching the merged commit on `main`.
+1. A merge to `main` starts the `CI` workflow, which installs with `npm ci` and
+   builds `team-site/` on Node 20.
+2. `team-site/scripts/generate-status.mjs` runs as a `postbuild` step and writes
+   `/health` and `/status` into the build output, so both endpoints are
+   regenerated on every build and cannot go stale against the commit.
+3. CI uploads the build as the artifact `site-dist-<commit-sha>`.
+4. `Request Organizer Deploy` fires on that successful CI run, refuses anything
+   that is not `main`, and sends a deploy request to the organizer deployer,
+   which publishes the artifact to the VPS.
 
-### T02 - Connect Custom Domain (blocked, organizer side)
+`/status` reports team, commit SHA, release ID, build and deploy time, public
+URL and the `T01` marker, all taken from the Actions environment at build time.
+A release badge in the sidebar shows team identity and the short commit.
 
-The A record `thebyteforce.deploysprint-finals.knurdz.org` already resolves to
-the team VPS and the domain serves over plain HTTP. The TXT challenge record
-could not be created: the DNS portal's Create Records action returns
-`Hostinger API 422 [DNS:4008] DNS resource record is not valid or conflicts with
-another resource record`. HTTPS is enabled by the deployer only after that
-record is applied, so it remains pending.
+Verify:
 
-Teams have no direct DNS or VPS access, so this cannot be resolved from the
-repository. It was reported to the organizers with the correlation ID from the
-error. Plain HTTP on the domain and the raw IP both continue to serve; no
-compatibility path was broken.
+- `http://4.155.210.79/` returns HTTP 200.
+- `http://4.155.210.79/health` returns `ok`.
+- `http://4.155.210.79/status` reports `"task": "T01"` with a `commit` matching
+  the merged commit on `main`, alongside `releaseId` and `deployedAt`.
 
-### T03 - Build Once Deploy Same Artifact
+### T02 - Connect Custom Domain
 
-CI builds the site exactly once. The `build` job uploads `team-site/dist` as
-`site-dist-<commit-sha>`, and the `verify-release-artifact` job performs a
-dry-run deploy by downloading that same artifact. That job never checks out the
-repository and never runs npm, so it cannot rebuild - the bytes it verifies are
-the bytes that were built and tested.
+The A record for `thebyteforce.deploysprint-finals.knurdz.org` resolves to the
+team VPS and the TXT ownership challenge is present, both created through the
+organizer DNS portal. The domain serves over plain HTTP and the raw IP continues
+to serve, so no compatibility path was broken.
 
-Artifact identity is recorded in `release-manifest.json`, generated during the
-run with the commit, artifact name, workflow run, file count and build time.
-
-Verify: the `Dry-run deploy from built artifact` job downloads `site-dist-<sha>`
-and lists its contents, and `npm run build` appears only in the `build` job.
-
-### T04 - Rollback To Known-Good Release
-
-`.github/workflows/rollback.yml` provides a manual `workflow_dispatch` rollback
-that takes a required `release_ref` (tag or commit SHA), checks out that exact
-release, rebuilds its artifact, and asks the organizer deployer to publish it
-again. Recovery therefore needs no SSH access to the VPS.
-
-Two safety properties:
-
-- The job refuses to run with an empty `release_ref` rather than rolling back to
-  an undefined target.
-- It shares the `request-organizer-deploy` concurrency group with the normal
-  deploy workflow, so a rollback and a regular release can never publish at the
-  same time.
-
-Verify: run the workflow from the Actions tab with a known-good `release_ref`
-and confirm the run summary records the requested release and the deploy request
-succeeds.
- without exposing credentials or private infrastructure details.
+HTTPS was still pending at the time of writing: the deployer enables TLS for the
+assigned domain on the first deploy after the records are applied. Teams have no
+DNS or VPS access, so this step is organizer-side.
