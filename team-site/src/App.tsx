@@ -12,7 +12,9 @@ import {
 import { CourseCard } from './components/CourseCard';
 import { DeadlineBoard } from './components/DeadlineBoard';
 import { LearningVelocity } from './components/LearningVelocity';
+import { ReleaseBadge } from './components/ReleaseBadge';
 import { StatCard } from './components/StatCard';
+import { WeatherWidget } from './components/WeatherWidget';
 import { courses } from './data/courses';
 import { deadlineCards } from './data/deadlines';
 import { sprintStats } from './data/stats';
@@ -57,6 +59,9 @@ export function App() {
           <ShieldCheck size={18} />
           <p>Repository changes are reviewed before every release.</p>
         </div>
+
+        <ReleaseBadge />
+        <WeatherWidget />
       </aside>
 
       <section className="workspace">
