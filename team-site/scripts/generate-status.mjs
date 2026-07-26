@@ -76,6 +76,11 @@ const status = {
     health: '/health',
     status: '/status',
   },
+  contact: {
+    provider: 'web3forms',
+    configured: Boolean(env('WEB3FORMS_ACCESS_KEY', 'VITE_WEB3FORMS_ACCESS_KEY')),
+    accessKeyStoredInSecret: true,
+  },
   config: {
     publicDeployLabel: publicDeployLabel || 'not-configured',
     publicUrlConfigured: Boolean(env('VITE_PUBLIC_URL', 'PUBLIC_URL', 'IP_PUBLIC_URL')),
