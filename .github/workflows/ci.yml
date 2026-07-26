@@ -27,6 +27,10 @@ jobs:
       - name: Build
         env:
           VITE_PUBLIC_URL: ${{ vars.PUBLIC_URL || vars.DOMAIN_PUBLIC_URL || secrets.PUBLIC_URL || vars.IP_PUBLIC_URL }}
+          VITE_TEAM_NAME: The Byte Force
+          VITE_COMMIT_SHA: ${{ github.sha }}
+          VITE_RELEASE_ID: ${{ github.run_id }}
+          TEAM_SLUG: ${{ vars.TEAM_SLUG }}
         run: npm run build
         working-directory: team-site
 
