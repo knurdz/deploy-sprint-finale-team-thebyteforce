@@ -537,3 +537,67 @@ h3 {
   font-size: 0.85rem;
   color: #526057;
 }
+
+/* T15 - Runtime Feature Flag: the insights panel, shown only when
+   FEATURE_SHOW_INSIGHTS resolves true at runtime. Mirrors .contactPanel so a
+   flagged feature looks native rather than bolted on. */
+.insightsPanel {
+  margin-top: 16px;
+  padding: 20px;
+  border: 1px solid #d8d2c4;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.insightsFlag {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: #6b7770;
+  border: 1px solid #ded7c8;
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.insightsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.insightCard {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 14px;
+  border: 1px solid #e3ddd0;
+  border-radius: 8px;
+  background: #fffaf2;
+}
+
+.insightLabel {
+  color: #69756d;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.insightValue {
+  color: #17201b;
+  font-size: 1.05rem;
+}
+
+.insightDetail {
+  margin: 0;
+  color: #526057;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 900px) {
+  .insightsGrid {
+    grid-template-columns: 1fr;
+  }
+}

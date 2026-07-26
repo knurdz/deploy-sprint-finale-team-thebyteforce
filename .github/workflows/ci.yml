@@ -91,6 +91,12 @@ jobs:
           # the bundle, the plain form for the build-time evidence generator.
           WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
           VITE_WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
+          # T15 - runtime feature flag. Deliberately NOT prefixed with VITE_:
+          # Vite inlines every VITE_* variable into the client bundle, which
+          # would turn this into a build-time constant. Unprefixed, it is read
+          # only by scripts/generate-feature-flags.mjs, which publishes the
+          # resolved boolean to /api/feature-flags for the app to fetch at load.
+          FEATURE_SHOW_INSIGHTS: ${{ secrets.FEATURE_SHOW_INSIGHTS }}
         run: npm run build
         working-directory: team-site
 

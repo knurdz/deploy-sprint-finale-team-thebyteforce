@@ -12,6 +12,7 @@ import {
 import { CourseCard } from './components/CourseCard';
 import { ContactForm } from './components/ContactForm';
 import { DeadlineBoard } from './components/DeadlineBoard';
+import { InsightsPanel } from './components/InsightsPanel';
 import { LearningVelocity } from './components/LearningVelocity';
 import { ReleaseBadge } from './components/ReleaseBadge';
 import { ReleaseReadiness } from './components/ReleaseReadiness';
@@ -128,6 +129,8 @@ export function App() {
 
         <ReleaseReadiness />
         <ContactForm />
+
+        <InsightsPanel />
       </section>
     </main>
   );
