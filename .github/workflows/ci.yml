@@ -6,6 +6,25 @@ on:
     branches:
       - main
 
+# T21 - least privilege. CI reads the repository and publishes build artifacts.
+# Artifact upload is governed by the Actions artifact API, not by `contents`, so
+# read-only is sufficient: no job here writes to the repository, cuts a release,
+# or comments on a pull request. Granting write "just in case" is how a leaked
+# token in a log becomes a repository compromise instead of an inconvenience.
+permissions:
+  contents: read
+
+# T21 - one CI run per ref.
+#
+# The asymmetry is deliberate. A superseded pull request run is cancelled: only
+# the latest commit on a PR matters. A run on `main` is never cancelled, because
+# `deploy.yml` chains off CI's conclusion via `workflow_run` - cancelling a main
+# build would silently drop a release rather than fail it, which is the worse of
+# the two outcomes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -131,10 +150,16 @@ jobs:
       # bundle; they are never echoed, and GitHub masks them in logs. If anyone
       # ever prefixes a secret with VITE_, Vite inlines it into dist/ and this
       # step fails the build instead of shipping the value to every visitor.
+      # T21 - PR_WORKFLOWS_GET_NO_DEPLOY_SECRETS. Both values resolve to an
+      # empty string on a pull_request run, so the check skips them and says so
+      # in the log. A pull request therefore never holds a deploy credential in
+      # its environment, while pushes to main still verify both are absent from
+      # the bundle - the check keeps full meaning exactly where the bundle is
+      # about to be published.
       - name: Assert no private value reached the client bundle
         env:
-          PRIVATE_DEPLOY_TOKEN: ${{ secrets.PRIVATE_DEPLOY_TOKEN }}
-          DEPLOYER_DISPATCH_TOKEN: ${{ secrets.DEPLOYER_DISPATCH_TOKEN }}
+          PRIVATE_DEPLOY_TOKEN: ${{ github.event_name != 'pull_request' && secrets.PRIVATE_DEPLOY_TOKEN || '' }}
+          DEPLOYER_DISPATCH_TOKEN: ${{ github.event_name != 'pull_request' && secrets.DEPLOYER_DISPATCH_TOKEN || '' }}
         run: |
           set -euo pipefail
           checked=0
