@@ -1,0 +1,183 @@
+name: Container Deploy Request
+
+# T18 - Containerized VPS Deploy
+#
+# Builds the SHA-tagged image from the T14 Dockerfile, proves the container it
+# produces actually serves the reviewed commit, and composes the container
+# deploy request for the organizer deployer.
+#
+# The request is composed and published as evidence rather than dispatched. The
+# approved deployer contract we can see in deploy.yml is
+# `team-thebyteforce-main-merged`, which publishes the dist artifact; we have no
+# confirmation that it accepts a container event type, and inventing one could
+# either be ignored silently or disrupt the live site. Sending a request whose
+# handling we cannot verify is worse than recording exactly what we would send.
+#
+# Participants hold no SSH credential and none is used here. The only route to
+# the VPS is the organizer deployer.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  container-release:
+    name: Build container and compose deploy request
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the SHA-tagged image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: deploy-sprint-thebyteforce:${{ github.sha }}
+          build-args: |
+            VITE_PUBLIC_URL=${{ vars.PUBLIC_URL || vars.IP_PUBLIC_URL }}
+            VITE_PUBLIC_DEPLOY_LABEL=${{ vars.PUBLIC_DEPLOY_LABEL }}
+            GITHUB_SHA=${{ github.sha }}
+            GITHUB_RUN_ID=${{ github.run_id }}
+          secrets: |
+            web3forms=${{ secrets.WEB3FORMS_ACCESS_KEY }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # This is the T18 question made executable: run the container we just
+      # built and confirm the commit it serves is the commit under review. A
+      # green build only says the image assembled - it says nothing about what
+      # the image will report once it is running.
+      - name: Prove the running container serves the reviewed commit
+        env:
+          CONTAINER_NAME: ${{ vars.CONTAINER_NAME || 'deploy-sprint-thebyteforce' }}
+          APP_PORT: ${{ vars.APP_PORT || '8080' }}
+        run: |
+          set -euo pipefail
+          image="deploy-sprint-thebyteforce:${{ github.sha }}"
+          docker run -d --name "$CONTAINER_NAME" -p "${APP_PORT}:8080" "$image"
+
+          for attempt in $(seq 1 20); do
+            if curl -fsS "http://localhost:${APP_PORT}/health" >/dev/null 2>&1; then
+              echo "Container healthy after ${attempt}s"
+              break
+            fi
+            if [ "$attempt" -eq 20 ]; then
+              echo "Container did not become healthy"
+              docker logs "$CONTAINER_NAME"
+              docker rm -f "$CONTAINER_NAME"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          served_commit=$(curl -fsS "http://localhost:${APP_PORT}/status" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["commit"])')
+          served_tag=$(curl -fsS "http://localhost:${APP_PORT}/status" \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["container"]["imageTag"])')
+
+          echo "reviewed commit : ${{ github.sha }}"
+          echo "container commit: ${served_commit}"
+          echo "container image : ${served_tag}"
+
+          if [ "$served_commit" != "${{ github.sha }}" ]; then
+            echo "FAIL: the running container reports a different commit than the one under review"
+            docker rm -f "$CONTAINER_NAME"
+            exit 1
+          fi
+          if [ "$served_tag" != "$image" ]; then
+            echo "FAIL: /status image tag does not match the tag we built"
+            docker rm -f "$CONTAINER_NAME"
+            exit 1
+          fi
+          echo "Container identity confirmed: image tag and served commit both match the reviewed commit"
+
+          docker rm -f "$CONTAINER_NAME"
+
+      - name: Compose the container deploy request
+        id: request
+        env:
+          CONTAINER_NAME: ${{ vars.CONTAINER_NAME || 'deploy-sprint-thebyteforce' }}
+          APP_PORT: ${{ vars.APP_PORT || '8080' }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          image="deploy-sprint-thebyteforce:${{ github.sha }}"
+          digest=$(docker image inspect "$image" --format '{{.Id}}')
+
+          # The same shape deploy.yml sends, extended with container fields. It
+          # is written to disk as evidence, not POSTed - see the header comment.
+          python3 - <<PY > container-deploy-request.json
+          import json
+          payload = {
+              "event_type": "team-thebyteforce-container-release",
+              "client_payload": {
+                  "team": "thebyteforce",
+                  "repo": "${{ github.repository }}",
+                  "sha": "${{ github.sha }}",
+                  "branch": "${{ github.ref_name }}",
+                  "source_run_id": "${{ github.run_id }}",
+                  "container": {
+                      "image": "$image",
+                      "digest": "$digest",
+                      "name": "$CONTAINER_NAME",
+                      "appPort": int("$APP_PORT"),
+                      "deployPath": "$DEPLOY_PATH",
+                      "restartPolicy": "unless-stopped",
+                      "healthEndpoint": "/health",
+                  },
+                  "dispatched": False,
+                  "note": "Composed by Actions for the organizer deployer. Not POSTed: the confirmed deployer contract is the dist-artifact event, and dispatching an unverified container event could disrupt the live site.",
+              },
+          }
+          print(json.dumps(payload, indent=2))
+          PY
+
+          cat container-deploy-request.json
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Upload container release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-release-${{ github.sha }}
+          path: container-deploy-request.json
+
+      - name: Publish container identity to the run summary
+        env:
+          CONTAINER_NAME: ${{ vars.CONTAINER_NAME || 'deploy-sprint-thebyteforce' }}
+          APP_PORT: ${{ vars.APP_PORT || '8080' }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Container release"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Image tag | \`deploy-sprint-thebyteforce:${{ github.sha }}\` |"
+            echo "| Image digest | \`${{ steps.request.outputs.digest }}\` |"
+            echo "| Container name | \`${CONTAINER_NAME}\` |"
+            echo "| App port | ${APP_PORT} |"
+            echo "| Reviewed commit | \`${{ github.sha }}\` |"
+            echo "| Commit served by container | \`${{ github.sha }}\` (asserted in CI) |"
+            echo "| Deploy route | Actions -> repository_dispatch -> organizer deployer |"
+            echo "| Participant SSH used | no |"
+            echo ""
+            echo "The image tag is the commit SHA, so the running container's identity"
+            echo "and the reviewed commit are the same string. \`/status\` reports both,"
+            echo "and this run asserts they match before publishing evidence."
+          } >> "$GITHUB_STEP_SUMMARY"
