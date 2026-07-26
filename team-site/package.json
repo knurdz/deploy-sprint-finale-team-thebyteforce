@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "postbuild": "node scripts/generate-status.mjs",
     "preview": "vite preview",
     "lint": "tsc --noEmit"
   },

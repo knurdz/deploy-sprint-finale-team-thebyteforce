@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { CourseCard } from './components/CourseCard';
 import { DeadlineBoard } from './components/DeadlineBoard';
+import { ReleaseBadge } from './components/ReleaseBadge';
 import { StatCard } from './components/StatCard';
 import { courses } from './data/courses';
 import { deadlineCards } from './data/deadlines';
@@ -56,6 +57,8 @@ export function App() {
           <ShieldCheck size={18} />
           <p>Repository changes are reviewed before every release.</p>
         </div>
+
+        <ReleaseBadge />
       </aside>
 
       <section className="workspace">
