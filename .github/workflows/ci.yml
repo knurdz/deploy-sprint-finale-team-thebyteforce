@@ -83,6 +83,14 @@ jobs:
           # scripts/generate-weather.mjs and never shipped to the browser.
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           OPENWEATHER_CITY: Colombo
+          # T10 - Web3Forms. Unlike the OpenWeather key, this one MUST reach the
+          # browser: Web3Forms posts client-side, so the access key is a form
+          # identifier rather than an authenticator. It is still sourced from a
+          # GitHub Secret and never committed, so it can be rotated in one place
+          # and stays masked in logs. Both names are provided: the VITE_ form for
+          # the bundle, the plain form for the build-time evidence generator.
+          WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
+          VITE_WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
         run: npm run build
         working-directory: team-site
 

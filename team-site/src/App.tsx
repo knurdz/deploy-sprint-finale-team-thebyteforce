@@ -10,6 +10,7 @@ import {
   Users,
 } from 'lucide-react';
 import { CourseCard } from './components/CourseCard';
+import { ContactForm } from './components/ContactForm';
 import { DeadlineBoard } from './components/DeadlineBoard';
 import { LearningVelocity } from './components/LearningVelocity';
 import { ReleaseBadge } from './components/ReleaseBadge';
@@ -126,6 +127,7 @@ export function App() {
         </section>
 
         <ReleaseReadiness />
+        <ContactForm />
       </section>
     </main>
   );
