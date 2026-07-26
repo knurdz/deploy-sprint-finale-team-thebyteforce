@@ -13,7 +13,7 @@ type FeatureFlagPayload = {
 /**
  * T15 - Runtime Feature Flag
  *
- * The flag is resolved at page load from /api/feature-flags, which CI generated
+ * The flag is resolved at page load from /config/feature-flags.json, which CI generated
  * from the FEATURE_SHOW_INSIGHTS environment value. It is deliberately not read
  * from import.meta.env: a VITE_* variable would be inlined into the bundle at
  * build time, which makes it a build-time constant rather than a runtime flag.
@@ -31,7 +31,7 @@ export function InsightsPanel() {
   useEffect(() => {
     let active = true;
 
-    fetch('/api/feature-flags')
+    fetch('/config/feature-flags.json')
       .then((res) => {
         if (!res.ok) {
           throw new Error(`status ${res.status}`);

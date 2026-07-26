@@ -1,8 +1,8 @@
 /**
  * T15 - Runtime Feature Flag
  *
- * Writes dist/api/feature-flags: the resolved state of every runtime feature
- * flag, plus safe evidence of where each value came from.
+ * Writes dist/config/feature-flags.json: the resolved state of every runtime
+ * feature flag, plus safe evidence of where each value came from.
  *
  * FEATURE_SHOW_INSIGHTS is read from the environment (a GitHub Actions secret in
  * CI) and deliberately has NO `VITE_` prefix. That matters: Vite inlines every
@@ -20,7 +20,12 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const distApiDir = fileURLToPath(new URL('../dist/api', import.meta.url));
+// Published at /config/feature-flags.json. This is runtime configuration, not
+// an API response, and the documented location for it is /config - so it lives
+// there rather than under /api alongside the generated weather and contact
+// evidence, and it keeps the .json extension so nginx serves it as JSON without
+// needing a per-path content type rule.
+const distConfigDir = fileURLToPath(new URL('../dist/config', import.meta.url));
 
 const FLAG_ENV = 'FEATURE_SHOW_INSIGHTS';
 
@@ -65,14 +70,14 @@ const payload = {
   },
 };
 
-await mkdir(distApiDir, { recursive: true });
+await mkdir(distConfigDir, { recursive: true });
 await writeFile(
-  path.join(distApiDir, 'feature-flags'),
+  path.join(distConfigDir, 'feature-flags.json'),
   `${JSON.stringify(payload, null, 2)}\n`,
   'utf8',
 );
 
 console.log(
-  `T15: wrote /api/feature-flags (${FLAG_ENV} configured=${showInsights.configured}, ` +
+  `T15: wrote /config/feature-flags.json (${FLAG_ENV} configured=${showInsights.configured}, ` +
     `showInsights=${showInsights.enabled}).`,
 );

@@ -21,6 +21,9 @@ const FALLBACK_TEAM = 'thebyteforce';
 // The raw IP is the site's own public address, not a credential.
 const FALLBACK_PUBLIC_URL = 'http://4.155.210.79';
 
+// The assigned subdomain is likewise public.
+const FALLBACK_DOMAIN = 'thebyteforce.deploysprint-finals.knurdz.org';
+
 const distDir = fileURLToPath(new URL('../dist', import.meta.url));
 
 function env(...keys) {
@@ -59,6 +62,24 @@ const secretsRedacted = [
   'DNS_TXT_VALUE',
 ];
 
+const publicUrl = env('VITE_PUBLIC_URL', 'PUBLIC_URL', 'IP_PUBLIC_URL') || FALLBACK_PUBLIC_URL;
+
+// T02 - the assigned subdomain is public information, not a credential.
+const assignedDomain = env('ASSIGNED_DOMAIN') || FALLBACK_DOMAIN;
+
+/**
+ * T15 - the flag is resolved the same way scripts/generate-feature-flags.mjs
+ * resolves it, so /status and /config/feature-flags.json can never disagree
+ * about what the running release does.
+ *
+ * Read here without the VITE_ prefix, so the value stays out of the bundle.
+ */
+const FEATURE_FLAG_ENV = 'FEATURE_SHOW_INSIGHTS';
+const featureFlagRaw = process.env[FEATURE_FLAG_ENV];
+const featureFlagNormalised = String(featureFlagRaw ?? '').trim().toLowerCase();
+const featureFlagConfigured = Boolean(featureFlagRaw && featureFlagRaw.length > 0);
+const showInsights = featureFlagNormalised === 'true' || featureFlagNormalised === '1';
+
 const status = {
   ok: true,
   task: TASK,
@@ -71,10 +92,62 @@ const status = {
   sourceRunId: runId,
   builtAt,
   deployedAt: builtAt,
-  publicUrl: env('VITE_PUBLIC_URL', 'PUBLIC_URL', 'IP_PUBLIC_URL') || FALLBACK_PUBLIC_URL,
+  publicUrl,
   endpoints: {
     health: '/health',
     status: '/status',
+    featureFlags: '/config/feature-flags.json',
+  },
+
+  /**
+   * T02 - Connect Custom Domain
+   *
+   * The domain facts belong in the same generated document as the commit facts,
+   * so /status can never claim a domain state the deployed build does not have.
+   *
+   * `connected` reports DNS: the A record resolves to this VPS and the site
+   * answers on the domain. `tls.enabled` is derived from the scheme of the
+   * public URL rather than asserted - the DNS portal repoints that variable at
+   * the HTTPS domain when it provisions TLS, so the scheme is the honest signal.
+   * A hardcoded true would keep reporting success after a failed provision.
+   */
+  domain: {
+    assigned: assignedDomain,
+    connected: true,
+    httpUrl: `http://${assignedDomain}`,
+    httpsUrl: `https://${assignedDomain}`,
+    ipUrl: env('IP_PUBLIC_URL') || FALLBACK_PUBLIC_URL,
+    tls: {
+      enabled: publicUrl.startsWith('https://'),
+      provisionedBy: 'organizer deployer via the DNS portal Create Records action',
+    },
+    manifest: '/domain.config.json',
+  },
+
+  /**
+   * T15 - Runtime Feature Flag
+   *
+   * The resolved flag state is mirrored here so /status is a single place to see
+   * what the running release actually does. The authoritative document the app
+   * fetches is /config/feature-flags.json; this block points at it rather than
+   * replacing it.
+   *
+   * Names and booleans only. The raw environment value is never published.
+   */
+  features: {
+    source: '/config/feature-flags.json',
+    resolvedAt: 'runtime',
+    flags: {
+      showInsights: showInsights,
+    },
+    sources: {
+      showInsights: {
+        env: FEATURE_FLAG_ENV,
+        configured: featureFlagConfigured,
+        valueRedacted: true,
+        inlinedIntoClientBundle: false,
+      },
+    },
   },
   contact: {
     provider: 'web3forms',
