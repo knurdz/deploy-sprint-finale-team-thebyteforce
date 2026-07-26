@@ -46,9 +46,10 @@ jobs:
       - name: Upload PR preview artifact
         uses: actions/upload-artifact@v4
         with:
-          # Preview identity includes the PR number and the commit SHA, so every
-          # preview is traceable to the exact PR commit it was built from.
-          name: pr-preview-${{ github.event.pull_request.number }}-${{ github.sha }}
+          # Organizer-required naming pattern (PREVIEW_ARTIFACT_NAME): the artifact
+          # is keyed to the PR head commit SHA, so every preview is traceable to
+          # the exact PR commit it was built from.
+          name: preview-${{ github.event.pull_request.head.sha }}
           path: team-site/dist
 
       - name: Publish preview evidence to the workflow summary
@@ -67,7 +68,7 @@ jobs:
             echo "| PR | #${PR_NUMBER} |"
             echo "| PR head commit | \`${HEAD_SHA}\` |"
             echo "| Built commit | \`${BUILD_SHA}\` |"
-            echo "| Preview artifact | \`pr-preview-${PR_NUMBER}-${BUILD_SHA}\` |"
+            echo "| Preview artifact | \`preview-${HEAD_SHA}\` |"
             echo "| previewUrl | \`${preview_url}\` |"
             echo "| Production changed | no - preview build only; production /status untouched |"
             echo ""
