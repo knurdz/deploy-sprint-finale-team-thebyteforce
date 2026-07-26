@@ -1,0 +1,65 @@
+name: Sentry Release
+
+# T30 - Create a Sentry release from GitHub Actions on every push to main.
+#
+# This is the ONLY place SENTRY_AUTH_TOKEN is used. It runs server-side in the
+# Actions runner, never in the browser, and the token is a GitHub secret that is
+# masked in logs. The frontend only ever gets the public VITE_SENTRY_DSN.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sentry-release:
+    name: Create Sentry release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release metadata in Sentry
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+          RELEASE: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SENTRY_AUTH_TOKEN}" ] || [ -z "${SENTRY_ORG}" ] || [ -z "${SENTRY_PROJECT}" ]; then
+            echo "Sentry secrets not fully configured; recording release metadata as evidence only." | tee -a "$GITHUB_STEP_SUMMARY"
+            {
+              echo "## Sentry release"
+              echo ""
+              echo "- Release: \`${RELEASE}\`"
+              echo "- Status: secrets not configured (dry-run evidence)"
+              echo "- Auth token exposed: no (server-side secret only)"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Create the release, then mark it deployed to production. The auth token
+          # is only ever sent to sentry.io over HTTPS in the Authorization header.
+          curl --fail-with-body --show-error --silent \
+            -X POST "https://sentry.io/api/0/organizations/${SENTRY_ORG}/releases/" \
+            -H "Authorization: Bearer ${SENTRY_AUTH_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"version\":\"${RELEASE}\",\"projects\":[\"${SENTRY_PROJECT}\"]}"
+
+          curl --fail-with-body --show-error --silent \
+            -X POST "https://sentry.io/api/0/organizations/${SENTRY_ORG}/releases/${RELEASE}/deploys/" \
+            -H "Authorization: Bearer ${SENTRY_AUTH_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"environment\":\"production\"}"
+
+          {
+            echo "## Sentry release"
+            echo ""
+            echo "- Release: \`${RELEASE}\`"
+            echo "- Project: \`${SENTRY_PROJECT}\`"
+            echo "- Environment: production"
+            echo "- Auth token exposed: no (server-side secret only)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Created Sentry release ${RELEASE}."
