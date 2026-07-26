@@ -1,0 +1,131 @@
+name: Docker Image
+
+# T14 - build the production image and prove it actually serves the site.
+#
+# Deliberately a separate workflow rather than a job inside CI: the image build
+# is slower than the site build, and keeping it apart means a Docker cache miss
+# never delays the CI gate that blocks merges.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# The job only reads the repository and builds locally; it publishes nothing.
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: Build and verify production image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Tagged with the commit SHA, never `latest`. A moving tag makes it
+      # impossible to say afterwards which image was running, which is the same
+      # traceability problem T03 solves for the dist artifact.
+      - name: Build image tagged with the commit SHA
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: deploy-sprint-thebyteforce:${{ github.sha }}
+          build-args: |
+            VITE_PUBLIC_URL=${{ vars.PUBLIC_URL || vars.IP_PUBLIC_URL }}
+            VITE_PUBLIC_DEPLOY_LABEL=${{ vars.PUBLIC_DEPLOY_LABEL }}
+            GITHUB_SHA=${{ github.sha }}
+            GITHUB_RUN_ID=${{ github.run_id }}
+          # Mounted for the build only. Unlike a build-arg it leaves no trace in
+          # image metadata, so `docker history` on the published image reveals
+          # nothing.
+          secrets: |
+            web3forms=${{ secrets.WEB3FORMS_ACCESS_KEY }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Building successfully is not the same as working. This runs the image
+      # and asserts the real endpoints answer on the expected port.
+      - name: Prove the image serves the built site on port 8080
+        run: |
+          set -euo pipefail
+          docker run -d --name site -p 8080:8080 "deploy-sprint-thebyteforce:${{ github.sha }}"
+
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+              echo "Container responded after ${attempt}s"
+              break
+            fi
+            if [ "$attempt" -eq 20 ]; then
+              echo "Container did not become healthy in 20s"
+              docker logs site
+              docker rm -f site
+              exit 1
+            fi
+            sleep 1
+          done
+
+          echo "--- / ---"
+          curl -fsS -o /dev/null -w 'HTTP %{http_code}\n' http://localhost:8080/
+          echo "--- /health ---"
+          curl -fsS http://localhost:8080/health
+          echo "--- /status ---"
+          curl -fsS http://localhost:8080/status | head -20
+          echo "--- /api/contact ---"
+          curl -fsS http://localhost:8080/api/contact | head -12
+
+          echo "--- 404 for an unknown path (no SPA fallback) ---"
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/definitely-not-a-real-path)
+          if [ "$code" != "404" ]; then
+            echo "Expected 404 for an unknown path, got $code"
+            docker rm -f site
+            exit 1
+          fi
+          echo "404 confirmed"
+
+          docker rm -f site
+
+      - name: Confirm the runtime image carries no build toolchain
+        run: |
+          set -euo pipefail
+          image="deploy-sprint-thebyteforce:${{ github.sha }}"
+          if docker run --rm --entrypoint sh "$image" -c 'command -v node' >/dev/null 2>&1; then
+            echo "FAIL: node is present in the runtime image; the build stage leaked"
+            exit 1
+          fi
+          echo "Runtime image contains no node binary, as expected"
+          if docker run --rm --entrypoint sh "$image" -c 'test -d /usr/share/nginx/html/node_modules' 2>/dev/null; then
+            echo "FAIL: node_modules was copied into the runtime image"
+            exit 1
+          fi
+          echo "Runtime image contains no node_modules, as expected"
+
+      - name: Publish image identity to the run summary
+        run: |
+          set -euo pipefail
+          image="deploy-sprint-thebyteforce:${{ github.sha }}"
+          size=$(docker image inspect "$image" --format '{{.Size}}')
+          digest=$(docker image inspect "$image" --format '{{.Id}}')
+          {
+            echo "## Production image"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Tag | \`$image\` |"
+            echo "| Image ID | \`$digest\` |"
+            echo "| Size | $((size / 1024 / 1024)) MB |"
+            echo "| Runtime port | 8080 |"
+            echo "| Base (runtime) | \`nginx:1.27-alpine\` |"
+            echo "| Build toolchain in runtime | no |"
+          } >> "$GITHUB_STEP_SUMMARY"
