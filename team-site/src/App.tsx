@@ -10,6 +10,7 @@ import {
   Users,
 } from 'lucide-react';
 import { CourseCard } from './components/CourseCard';
+import { ContactForm } from './components/ContactForm';
 import { DeadlineBoard } from './components/DeadlineBoard';
 import { ReleaseBadge } from './components/ReleaseBadge';
 import { StatCard } from './components/StatCard';
@@ -120,6 +121,8 @@ export function App() {
 
           <DeadlineBoard deadlines={deadlineCards} />
         </section>
+
+        <ContactForm />
       </section>
     </main>
   );

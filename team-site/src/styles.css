@@ -449,3 +449,56 @@ h3 {
     white-space: normal;
   }
 }
+.contactPanel {
+  margin-top: 16px;
+  padding: 20px;
+  border: 1px solid #d8d2c4;
+  border-radius: 8px;
+  background: #fffdf8;
+}
+.contactHeader {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.contactForm {
+  display: grid;
+  gap: 12px;
+  max-width: 560px;
+}
+.contactForm label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+.contactForm input,
+.contactForm textarea {
+  padding: 10px 12px;
+  border: 1px solid #cfc9bb;
+  border-radius: 6px;
+  font: inherit;
+}
+.contactForm button {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 6px;
+  background: #17201b;
+  color: #f7f3eb;
+  font-weight: 700;
+  cursor: pointer;
+}
+.contactForm button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.contactNote {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #526057;
+}
+
