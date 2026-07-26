@@ -106,6 +106,10 @@ jobs:
         env:
           BASE: ${{ steps.target.outputs.url }}
           EXPECTED_COMMIT: ${{ steps.target.outputs.sha }}
+          # Local artifact runs are instant; a live release has to travel through
+          # the organizer deployer, so only that path gets a propagation budget.
+          PROPAGATION_BUDGET: ${{ github.event_name == 'pull_request' && 0 || 120 }}
+          POLL_INTERVAL: 10
         run: |
           set -euo pipefail
           fail() { echo "SMOKE FAIL: $*"; exit 1; }
@@ -127,21 +131,45 @@ jobs:
             || fail "/status did not return valid JSON - a deploy that serves index.html here looks healthy but is broken"
 
           echo "== 4/5  /status commit matches the expected release =="
-          served=$(python3 -c 'import json; print(json.load(open("status.json")).get("commit",""))')
+          # A deploy request completing is not the same as a deploy landing. The
+          # organizer deployer publishes asynchronously, so checking once and
+          # immediately is a race: we would report a stale deploy for a release
+          # that is merely still in flight. Poll instead, with a bounded budget,
+          # so the failure can distinguish "never published" from "published the
+          # wrong thing" - two different incidents with two different owners.
+          served=""
+          waited=0
           echo "  expected: $EXPECTED_COMMIT"
-          echo "  served  : $served"
+          while :; do
+            curl --fail --silent --show-error "$BASE/status" -o status.json 2>/dev/null || true
+            served=$(python3 -c 'import json; print(json.load(open("status.json")).get("commit",""))' 2>/dev/null || echo "")
+            [ "$served" = "$EXPECTED_COMMIT" ] && break
+            [ "$waited" -ge "$PROPAGATION_BUDGET" ] && break
+            echo "  waited ${waited}s - serving ${served:-<none>}"
+            sleep "$POLL_INTERVAL"
+            waited=$((waited + POLL_INTERVAL))
+          done
+          echo "  served  : ${served:-<none>}"
           if [ "$served" != "$EXPECTED_COMMIT" ]; then
-            fail "STALE DEPLOY - the site is up but serving commit ${served:-<none>}, not ${EXPECTED_COMMIT}. Every uptime check above passed; only this one catches it."
+            fail "STALE DEPLOY - after ${PROPAGATION_BUDGET}s the site is still serving ${served:-<none>}, not ${EXPECTED_COMMIT}. Every uptime check above passed; only this one catches it. The deploy request succeeded, so the artifact was accepted but never published."
           fi
+          if [ "$waited" -gt 0 ]; then echo "  (release landed after ${waited}s of propagation)"; fi
 
-          echo "== 5/5  task-specific marker: /api/contact =="
-          curl --fail --silent --show-error "$BASE/api/contact" -o contact.json \
-            || fail "/api/contact did not return a success status"
-          provider=$(python3 -c 'import json; print(json.load(open("contact.json")).get("contact",{}).get("provider",""))') \
-            || fail "/api/contact did not return valid JSON"
-          echo "  contact provider: $provider"
-          [ "$provider" = "web3forms" ] \
-            || fail "/api/contact reported provider '$provider' - a partial rollout can leave the shell in place while generated endpoints are missing"
+          echo "== 5/5  generated endpoints survived the rollout =="
+          # One marker is not enough. A partial rollout can leave index.html in
+          # place while individual generated endpoints are missing, so each one a
+          # task depends on is checked by name. Anything that 404s, or returns
+          # index.html instead of JSON, fails the release.
+          check_json () {
+            curl --fail --silent --show-error "$BASE$1" -o probe.json               || fail "$1 did not return a success status - the rollout is partial"
+            got=$(python3 -c "import json;d=json.load(open('probe.json'));print($2)" 2>/dev/null)               || fail "$1 did not return valid JSON - a deploy serving index.html here looks healthy but is broken"
+            echo "  $4: $got"
+            [ "$got" = "$3" ] || fail "$1 reported '$got', expected '$3'"
+          }
+
+          check_json /api/contact               "d.get('contact',{}).get('provider','')" web3forms   "contact provider"
+          check_json /api/weather               "d.get('weather',{}).get('provider','')" openweather "weather provider"
+          check_json /config/feature-flags.json "d.get('task','')"                       T15         "feature flag doc"
 
           echo ""
           echo "All 5 smoke checks passed against ${{ steps.target.outputs.mode }}."
