@@ -39,3 +39,73 @@ jobs:
         with:
           name: site-dist-${{ github.sha }}
           path: team-site/dist
+
+  # Build once, deploy many: this job consumes the exact artifact produced by
+  # `build` above. It never checks out source and never runs npm, so the bytes
+  # that get verified here are the same bytes that were built and tested.
+  verify-release-artifact:
+    name: Dry-run deploy from built artifact
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the exact artifact built by CI
+        uses: actions/download-artifact@v4
+        with:
+          name: site-dist-${{ github.sha }}
+          path: release-candidate
+
+      - name: Verify the artifact is deployable without rebuilding
+        run: |
+          set -euo pipefail
+          test -f release-candidate/index.html
+          test -d release-candidate/assets
+          echo "Artifact contents:"
+          find release-candidate -type f | sort
+
+      - name: Generate release manifest
+        env:
+          ARTIFACT_NAME: site-dist-${{ github.sha }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_NUMBER: ${{ github.run_number }}
+          REPO: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          file_count=$(find release-candidate -type f | wc -l)
+          cat > release-manifest.json <<JSON
+          {
+            "schemaVersion": 1,
+            "commit": "${COMMIT_SHA}",
+            "shortCommit": "${COMMIT_SHA:0:7}",
+            "artifactName": "${ARTIFACT_NAME}",
+            "workflowRun": "${RUN_ID}",
+            "workflowRunNumber": "${RUN_NUMBER}",
+            "repository": "${REPO}",
+            "ref": "${REF_NAME}",
+            "fileCount": ${file_count},
+            "builtAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "rebuiltDuringDeploy": false
+          }
+          JSON
+          cat release-manifest.json
+
+      - name: Publish artifact identity to the run summary
+        run: |
+          set -euo pipefail
+          {
+            echo "## Release candidate"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Artifact | \`site-dist-${{ github.sha }}\` |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Workflow run | [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo "| Rebuilt during deploy | no |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest-${{ github.sha }}
+          path: release-manifest.json
