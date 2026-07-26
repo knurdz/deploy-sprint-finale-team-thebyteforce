@@ -1,0 +1,50 @@
+# T14 - keep the build context small and keep secrets out of it.
+#
+# Anything listed here never reaches the Docker daemon, so it cannot end up in
+# an image layer even by accident. Excluding node_modules also forces the image
+# to install from the lockfile rather than inheriting a host install that may
+# contain platform-specific binaries built for a different OS.
+
+# Dependencies and build output - reinstalled/rebuilt inside the image
+node_modules
+**/node_modules
+dist
+**/dist
+build
+**/build
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Version control and CI metadata
+.git
+.gitignore
+.github
+
+# Logs, caches and local artifacts
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm
+.cache
+coverage
+.nyc_output
+.DS_Store
+Thumbs.db
+
+# Editor and local tooling directories
+.vscode
+.idea
+
+# Docs and evidence that the runtime image does not need
+docs
+*.md
+!README.md
