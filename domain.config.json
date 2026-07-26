@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "task": "T02",
+  "assignedDomain": "thebyteforce.deploysprint-finals.knurdz.org",
+  "domain": {
+    "connected": true,
+    "verifiedAt": "2026-07-26T06:39:19Z",
+    "verificationMethod": "public DNS lookup against 8.8.8.8 plus live HTTP response from the assigned host"
+  },
+  "dnsRecords": {
+    "site": {
+      "recordType": "A",
+      "recordName": "thebyteforce",
+      "recordValue": "4.155.210.79",
+      "resolves": true
+    },
+    "challenge": {
+      "recordType": "TXT",
+      "recordName": "_deploy-sprint-challenge.thebyteforce",
+      "recordValue": "<redacted: stored as DNS_TXT_VALUE>",
+      "resolves": true
+    }
+  },
+  "urls": {
+    "DOMAIN_HTTP_URL": "http://thebyteforce.deploysprint-finals.knurdz.org",
+    "DOMAIN_PUBLIC_URL": "https://thebyteforce.deploysprint-finals.knurdz.org",
+    "IP_PUBLIC_URL": "http://4.155.210.79",
+    "PUBLIC_URL": "http://thebyteforce.deploysprint-finals.knurdz.org"
+  },
+  "compatibility": {
+    "domainOverHttp": "200",
+    "rawIpOverHttp": "200",
+    "domainOverHttps": "not-enabled",
+    "forcedHttpsRedirect": false
+  },
+  "tls": {
+    "enabled": false,
+    "note": "Organizers confirmed this event runs HTTP-only; TLS is not provisioned for team domains. PUBLIC_URL therefore stays on the HTTP domain rather than pointing at an HTTPS endpoint that does not answer."
+  },
+  "endpoints": {
+    "health": "/health",
+    "status": "/status"
+  },
+  "secretsRedacted": [
+    "DNS_PORTAL_USERNAME",
+    "DNS_PORTAL_PASSWORD",
+    "DNS_TXT_VALUE"
+  ]
+}
