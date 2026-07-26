@@ -31,6 +31,10 @@ jobs:
           VITE_COMMIT_SHA: ${{ github.sha }}
           VITE_RELEASE_ID: ${{ github.run_id }}
           TEAM_SLUG: ${{ vars.TEAM_SLUG }}
+          # T05: public config only. Anything VITE_* is inlined into the client
+          # bundle, so this must come from a repository variable and never from
+          # a secret. Private values are supplied to deploy steps instead.
+          VITE_PUBLIC_DEPLOY_LABEL: ${{ vars.PUBLIC_DEPLOY_LABEL }}
           # T07 - server-side only. The key is used at build time by
           # scripts/generate-weather.mjs and never shipped to the browser.
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
@@ -50,6 +54,34 @@ jobs:
           test -d team-site/dist/assets
           test -s team-site/dist/index.html
           echo "Build output verified: $(find team-site/dist -type f | wc -l) files"
+
+      # T05: prove the separation instead of asserting it. Runs after the output
+      # check above, so it can never pass vacuously against an empty dist/. The
+      # private values are read here only to confirm they are ABSENT from the
+      # bundle; they are never echoed, and GitHub masks them in logs. If anyone
+      # ever prefixes a secret with VITE_, Vite inlines it into dist/ and this
+      # step fails the build instead of shipping the value to every visitor.
+      - name: Assert no private value reached the client bundle
+        env:
+          PRIVATE_DEPLOY_TOKEN: ${{ secrets.PRIVATE_DEPLOY_TOKEN }}
+          DEPLOYER_DISPATCH_TOKEN: ${{ secrets.DEPLOYER_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          checked=0
+          for name in PRIVATE_DEPLOY_TOKEN DEPLOYER_DISPATCH_TOKEN; do
+            value="${!name:-}"
+            if [ -z "$value" ]; then
+              echo "$name is not configured; skipping its bundle check"
+              continue
+            fi
+            checked=$((checked + 1))
+            if grep -rqF -- "$value" team-site/dist; then
+              echo "FAIL: the value of $name was found inside team-site/dist"
+              exit 1
+            fi
+            echo "$name: value absent from the client bundle"
+          done
+          echo "Client bundle leak check complete ($checked secret(s) checked)."
 
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
