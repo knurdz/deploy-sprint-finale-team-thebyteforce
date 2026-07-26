@@ -48,7 +48,7 @@ Use this section for short public notes and links. Full task instructions and ch
 | T16 |  |  |  |
 | T17 |  |  |  |
 | T18 |  |  |  |
-| T19 |  |  |  |
+| T19 | `task/T19-harden-smoke-verification` | Actions > `Post-Deploy Smoke Tests` | Post-deploy verification of `/`, `/health`, `/status` commit and the generated endpoints. Fails the run on a stale or partial release rather than warning. Live checks poll for a bounded propagation window so a slow publish is not misreported as a stale deploy. |
 | T20 |  |  |  |
 | T21 |  |  |  |
 | T22 |  |  |  |
