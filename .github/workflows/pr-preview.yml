@@ -1,0 +1,78 @@
+name: PR Preview
+
+# T11 - Pull Request Preview Deployment
+#
+# Builds an ISOLATED preview for every pull request and publishes it as a
+# PR-numbered artifact plus a workflow summary. This workflow never publishes to
+# production: it has no production-publish step and never runs on main, so a
+# preview build can never change the live site or its /status. Production
+# releases stay in the main-only workflows.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+# One preview per PR. A newer commit on the same PR cancels the older preview
+# run, so each PR keeps a single current preview instead of piling up stale ones.
+concurrency:
+  group: pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    name: Build PR preview
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: team-site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: team-site
+
+      - name: Build the preview (no production deploy)
+        run: npm run build
+        working-directory: team-site
+
+      - name: Upload PR preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # Preview identity includes the PR number and the commit SHA, so every
+          # preview is traceable to the exact PR commit it was built from.
+          name: pr-preview-${{ github.event.pull_request.number }}-${{ github.sha }}
+          path: team-site/dist
+
+      - name: Publish preview evidence to the workflow summary
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BUILD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          preview_url="/previews/pr-${PR_NUMBER}"
+          {
+            echo "## PR preview"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| PR | #${PR_NUMBER} |"
+            echo "| PR head commit | \`${HEAD_SHA}\` |"
+            echo "| Built commit | \`${BUILD_SHA}\` |"
+            echo "| Preview artifact | \`pr-preview-${PR_NUMBER}-${BUILD_SHA}\` |"
+            echo "| previewUrl | \`${preview_url}\` |"
+            echo "| Production changed | no - preview build only; production /status untouched |"
+            echo ""
+            echo "Reviewers: download the artifact above to inspect this PR's built site."
+            echo "Cleanup/overwrite: concurrency keeps one preview per PR (newer commits"
+            echo "supersede older runs), and artifacts expire under the repository's"
+            echo "retention policy. This workflow never deploys to production."
+          } >> "$GITHUB_STEP_SUMMARY"
