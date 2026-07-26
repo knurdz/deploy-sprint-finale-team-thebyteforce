@@ -35,6 +35,9 @@ function env(...keys) {
   return '';
 }
 
+// T18 - the image name the container workflow builds and tags per commit.
+const CONTAINER_IMAGE = 'deploy-sprint-thebyteforce';
+
 const commit = env('GITHUB_SHA') || 'local-build';
 const runId = env('GITHUB_RUN_ID') || 'local';
 const builtAt = new Date().toISOString();
@@ -97,6 +100,29 @@ const status = {
     health: '/health',
     status: '/status',
     featureFlags: '/config/feature-flags.json',
+  },
+
+  /**
+   * T18 - Containerized VPS Deploy
+   *
+   * The image tag is derived from the same commit this status document reports,
+   * so "is the running container the version we reviewed?" is answered by
+   * comparing two fields in one document rather than by trusting a claim:
+   * `container.imageTag` ends with `commit`.
+   *
+   * That only works because the tag is the commit SHA. A moving tag like
+   * `latest` would make the question unanswerable after the fact - you could
+   * see which tag is running but never which code it was built from.
+   */
+  container: {
+    task: 'T18',
+    imageName: CONTAINER_IMAGE,
+    imageTag: `${CONTAINER_IMAGE}:${commit}`,
+    containerName: env('CONTAINER_NAME') || CONTAINER_IMAGE,
+    appPort: Number(env('APP_PORT')) || 8080,
+    tagStrategy: 'commit-sha',
+    deployPath: 'GitHub Actions -> repository_dispatch -> organizer deployer',
+    participantSshUsed: false,
   },
 
   /**
