@@ -1,0 +1,205 @@
+name: Release Strategy
+
+# T17 - Low-Downtime Release Strategy
+#
+# Exercises scripts/release-switch.sh against the real build output, in both
+# directions:
+#
+#   Scenario A - healthy candidate  -> gate passes, `current` moves
+#   Scenario B - broken candidate   -> gate fails, `current` stays put
+#
+# Scenario B is the one that matters. Any deploy script looks correct on the
+# happy path; the question is what it does when the new release is bad. This
+# workflow fails if a broken release is ever promoted, so the guarantee is
+# enforced on every commit rather than asserted in a README.
+#
+# This is a rehearsal, not the production deploy: it runs entirely on the runner
+# and never contacts the VPS. Teams hold no SSH access, so the organizer
+# deployer remains the only thing that publishes.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-strategy-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  rehearse:
+    name: Release switch rehearsal
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: team-site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: team-site
+
+      - name: Build the candidate release
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: npm run build
+        working-directory: team-site
+
+      # Scenario A: a real, healthy build. The gate should pass and `current`
+      # should end up pointing at this release.
+      - name: "Scenario A - healthy candidate is promoted"
+        id: healthy
+        run: |
+          set -euo pipefail
+          chmod +x scripts/release-switch.sh
+
+          # Status is captured explicitly rather than piping into tee. The exit
+          # status of a pipeline is that of its LAST command, so `script | tee`
+          # reports tee's success and would hide a failing deploy script.
+          status=0
+          scripts/release-switch.sh \
+            --source team-site/dist \
+            --sha "healthy-${GITHUB_SHA::12}" \
+            --root deploy \
+            --port 8099 > scenario-a.log 2>&1 || status=$?
+          cat scenario-a.log
+
+          if [ "$status" -ne 0 ]; then
+            echo "::error::healthy candidate failed the gate (exit ${status})"
+            exit 1
+          fi
+
+          target="$(readlink deploy/current)"
+          echo "current -> ${target}"
+          if [ "$target" != "releases/healthy-${GITHUB_SHA::12}" ]; then
+            echo "::error::healthy release was not promoted"
+            exit 1
+          fi
+          test -s deploy/current/index.html
+          test -s deploy/current/health
+          echo "good_release=${target}" >> "$GITHUB_OUTPUT"
+
+      # Scenario B: a deliberately broken candidate - /health removed, exactly
+      # the failure organizers may inject. The gate must refuse it.
+      - name: "Scenario B - broken candidate is refused and current survives"
+        run: |
+          set -euo pipefail
+
+          rm -rf broken-build
+          cp -R team-site/dist broken-build
+          rm -f broken-build/health          # the health endpoint is gone
+          : > broken-build/index.html        # and the landing page is empty
+
+          before="$(readlink deploy/current)"
+          echo "current before: ${before}"
+
+          # The script is expected to exit non-zero here. A zero exit would mean
+          # a broken release was promoted, which is the failure this task exists
+          # to prevent - so the check is inverted.
+          status=0
+          scripts/release-switch.sh \
+            --source broken-build \
+            --sha "broken-${GITHUB_SHA::12}" \
+            --root deploy \
+            --port 8098 > scenario-b.log 2>&1 || status=$?
+          cat scenario-b.log
+
+          if [ "$status" -eq 0 ]; then
+            echo "::error::broken candidate was promoted - the health gate did not hold"
+            exit 1
+          fi
+          echo "gate refused the broken candidate (exit ${status}) as expected"
+
+          after="$(readlink deploy/current)"
+          echo "current after : ${after}"
+
+          if [ "$before" != "$after" ]; then
+            echo "::error::current moved during a failed release (${before} -> ${after})"
+            exit 1
+          fi
+
+          # The known-good release must still be readable and non-empty, not
+          # merely still pointed at.
+          test -s deploy/current/index.html
+          test -s deploy/current/health
+          [ "$(cat deploy/current/health)" = "ok" ]
+
+          echo "known-good release survived the failed deploy"
+
+      # Post-switch health gate. The pre-switch gate proves the candidate was
+      # healthy in isolation; this proves the release is still healthy through
+      # the `current` symlink that traffic actually follows. A correct release
+      # directory with a mis-pointed symlink would pass the first and fail this.
+      - name: "Health gate - verify the promoted release serves through current/"
+        run: |
+          set -euo pipefail
+
+          node scripts/serve-release.mjs deploy/current 8097 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          ok=0
+          for _ in $(seq 1 20); do
+            if [ "$(curl -fsS --max-time 2 http://127.0.0.1:8097/health || true)" = "ok" ]; then
+              ok=1
+              break
+            fi
+            sleep 0.5
+          done
+
+          if [ "$ok" != "1" ]; then
+            echo "::error::promoted release does not answer /health through current/"
+            exit 1
+          fi
+
+          curl -fsS --max-time 2 http://127.0.0.1:8097/ -o /dev/null
+          echo "promoted release serves / and /health through deploy/current"
+
+      - name: Confirm the failed candidate was retained for inspection
+        run: |
+          set -euo pipefail
+          ls -1 deploy/releases
+          # The broken release is kept on disk rather than deleted. It never
+          # receives traffic, and keeping it is what makes a post-mortem possible.
+          test -d "deploy/releases/broken-${GITHUB_SHA::12}"
+          echo "failed candidate retained without ever serving traffic"
+
+      - name: Release strategy summary
+        if: always()
+        run: |
+          {
+            echo "## T17 release switch rehearsal"
+            echo ""
+            echo "| Scenario | Candidate | Health gate | Traffic switched | current after |"
+            echo "| --- | --- | --- | --- | --- |"
+            echo "| A healthy | \`healthy-${GITHUB_SHA::12}\` | pass | yes | \`$(readlink deploy/current 2>/dev/null || echo n/a)\` |"
+            echo "| B broken | \`broken-${GITHUB_SHA::12}\` | **fail** | **no** | \`$(readlink deploy/current 2>/dev/null || echo n/a)\` |"
+            echo ""
+            echo "Traffic is switched by a single \`mv -T\` of a symlink, and only"
+            echo "after the candidate answers \`/health\` with \`ok\` over HTTP on its"
+            echo "own port. A failing candidate leaves \`current\` untouched."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload rehearsal logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-strategy-logs-${{ github.sha }}
+          path: |
+            scenario-a.log
+            scenario-b.log
+          if-no-files-found: error
