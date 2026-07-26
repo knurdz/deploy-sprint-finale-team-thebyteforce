@@ -97,6 +97,13 @@ jobs:
           # only by scripts/generate-feature-flags.mjs, which publishes the
           # resolved boolean to /api/feature-flags for the app to fetch at load.
           FEATURE_SHOW_INSIGHTS: ${{ secrets.FEATURE_SHOW_INSIGHTS }}
+          # T16 - Resend email alerts. Server-side only: RESEND_API_KEY is read at
+          # build time by scripts/generate-email-status.mjs and never shipped to
+          # the browser (no VITE_ prefix). Sender/recipient are safe test values.
+          EMAIL_PROVIDER: resend
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_EMAIL: ${{ vars.RESEND_FROM_EMAIL }}
+          ALERT_RECIPIENT_EMAIL: ${{ vars.ALERT_RECIPIENT_EMAIL }}
         run: npm run build
         working-directory: team-site
 
