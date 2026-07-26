@@ -1,0 +1,163 @@
+name: Post-Deploy Smoke Tests
+
+# T19 - verify a release actually landed before calling it successful.
+#
+# The important check is not "is the site up". A stale deploy answers every
+# uptime check perfectly: / returns 200, /health returns 200, /status returns
+# 200 - all served by an older build. Only comparing the commit reported by
+# /status against the commit we expected catches that, which is why the commit
+# assertion is the one that fails the job rather than just warning.
+#
+# Two targets, one set of checks:
+#   pull_request  -> the freshly built artifact, served locally. The fallback
+#                    path the task allows, and it proves the checks work against
+#                    a known-good target.
+#   after deploy  -> the live site, once Request Organizer Deploy completes.
+#                    This is the run that catches a stale or partial rollout.
+
+on:
+  pull_request:
+  workflow_run:
+    workflows: ["Request Organizer Deploy"]
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: Base URL to smoke test (defaults to PUBLIC_URL)
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Smoke test the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: team-site/package-lock.json
+
+      - name: Build and serve the artifact locally
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          VITE_PUBLIC_URL: ${{ vars.PUBLIC_URL || vars.IP_PUBLIC_URL }}
+        run: |
+          set -euo pipefail
+          npm ci --prefix team-site
+          npm run build --prefix team-site
+          python3 -m http.server 8080 --directory team-site/dist &
+          for _ in $(seq 1 20); do
+            curl -fsS http://localhost:8080/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+
+      - name: Resolve smoke target
+        id: target
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_URL: ${{ inputs.target_url }}
+          VAR_URL: ${{ vars.PUBLIC_URL || vars.IP_PUBLIC_URL }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          MANUAL_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ]; then
+            url="http://localhost:8080"
+            sha="$MANUAL_SHA"
+            mode="artifact (local)"
+          else
+            url="${INPUT_URL:-$VAR_URL}"
+            sha="${RUN_SHA:-$MANUAL_SHA}"
+            mode="live release"
+          fi
+          if [ -z "$url" ]; then
+            echo "No smoke target resolved. Set PUBLIC_URL or IP_PUBLIC_URL."
+            exit 1
+          fi
+          url="${url%/}"
+          echo "url=$url"   >> "$GITHUB_OUTPUT"
+          echo "sha=$sha"   >> "$GITHUB_OUTPUT"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "Smoke target: $url"
+          echo "Expected commit: $sha"
+
+      # Each check exits 1 on failure, so the workflow is red the moment any one
+      # of them fails. Nothing here warns and carries on - a smoke test that
+      # tolerates a failure is not a gate.
+      - name: Smoke checks
+        env:
+          BASE: ${{ steps.target.outputs.url }}
+          EXPECTED_COMMIT: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          fail() { echo "SMOKE FAIL: $*"; exit 1; }
+
+          echo "== 1/5  GET / =="
+          curl --fail --silent --show-error -o /dev/null -w '  HTTP %{http_code}\n' "$BASE/" \
+            || fail "the site root did not return a success status"
+
+          echo "== 2/5  GET /health =="
+          health=$(curl --fail --silent --show-error "$BASE/health") \
+            || fail "/health did not return a success status"
+          echo "  body: $health"
+          [ -n "$health" ] || fail "/health returned an empty body"
+
+          echo "== 3/5  GET /status parses as JSON =="
+          curl --fail --silent --show-error "$BASE/status" -o status.json \
+            || fail "/status did not return a success status"
+          python3 -c 'import json,sys; json.load(open("status.json"))' \
+            || fail "/status did not return valid JSON - a deploy that serves index.html here looks healthy but is broken"
+
+          echo "== 4/5  /status commit matches the expected release =="
+          served=$(python3 -c 'import json; print(json.load(open("status.json")).get("commit",""))')
+          echo "  expected: $EXPECTED_COMMIT"
+          echo "  served  : $served"
+          if [ "$served" != "$EXPECTED_COMMIT" ]; then
+            fail "STALE DEPLOY - the site is up but serving commit ${served:-<none>}, not ${EXPECTED_COMMIT}. Every uptime check above passed; only this one catches it."
+          fi
+
+          echo "== 5/5  task-specific marker: /api/contact =="
+          curl --fail --silent --show-error "$BASE/api/contact" -o contact.json \
+            || fail "/api/contact did not return a success status"
+          provider=$(python3 -c 'import json; print(json.load(open("contact.json")).get("contact",{}).get("provider",""))') \
+            || fail "/api/contact did not return valid JSON"
+          echo "  contact provider: $provider"
+          [ "$provider" = "web3forms" ] \
+            || fail "/api/contact reported provider '$provider' - a partial rollout can leave the shell in place while generated endpoints are missing"
+
+          echo ""
+          echo "All 5 smoke checks passed against ${{ steps.target.outputs.mode }}."
+
+      - name: Publish smoke result to the run summary
+        if: always()
+        run: |
+          {
+            echo "## Smoke test"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Target | \`${{ steps.target.outputs.url }}\` |"
+            echo "| Mode | ${{ steps.target.outputs.mode }} |"
+            echo "| Expected commit | \`${{ steps.target.outputs.sha }}\` |"
+            echo "| Result | ${{ job.status }} |"
+            echo ""
+            echo "Checks: \`/\`, \`/health\`, \`/status\` parses, \`/status.commit\` matches, \`/api/contact\` marker."
+          } >> "$GITHUB_STEP_SUMMARY"
