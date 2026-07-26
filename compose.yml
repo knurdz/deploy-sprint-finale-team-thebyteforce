@@ -40,16 +40,35 @@ services:
       start_period: 5s
       retries: 3
 
-    # The image already runs nginx as an unprivileged user. These narrow what a
-    # compromise could reach: the filesystem is immutable apart from the two
-    # paths nginx genuinely writes to, no capabilities are retained, and no
-    # child process can gain privileges its parent did not have.
+    # The filesystem is immutable except for the paths nginx genuinely writes to.
+    #
+    # /var/log/nginx is deliberately NOT a tmpfs: in the nginx image those files
+    # are symlinks to /dev/stdout and /dev/stderr, and mounting over them would
+    # send the logs to a throwaway filesystem instead of `docker compose logs`.
     read_only: true
     tmpfs:
       - /tmp
+      - /var/run
       - /var/cache/nginx
+
+    # Drop everything, then add back only what the image actually needs.
+    #
+    # The Dockerfile installs our config as conf.d/default.conf and sets no USER,
+    # so the stock /etc/nginx/nginx.conf applies: the master process starts as
+    # root, chowns its cache directories to uid 101, then drops the workers to
+    # the nginx user. That needs CHOWN, SETUID and SETGID. Dropping ALL with
+    # nothing added back makes the container fail to start with
+    #   chown("/var/cache/nginx/client_temp", 101) failed (Operation not permitted)
+    #
+    # NET_BIND_SERVICE is intentionally absent: the listener is on 8080, and a
+    # port above 1024 needs no privilege to bind.
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
     security_opt:
       - no-new-privileges:true
 
