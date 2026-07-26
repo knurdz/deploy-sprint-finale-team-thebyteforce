@@ -116,6 +116,11 @@ jobs:
           # only by scripts/generate-feature-flags.mjs, which publishes the
           # resolved boolean to /api/feature-flags for the app to fetch at load.
           FEATURE_SHOW_INSIGHTS: ${{ secrets.FEATURE_SHOW_INSIGHTS }}
+          # T30 - Sentry DSN is a PUBLIC client-side identifier (it can only send
+          # events), so it is safe to inline into the browser bundle. The sensitive
+          # SENTRY_AUTH_TOKEN is never here - it stays server-side in the release
+          # workflow only.
+          VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           # T16 - Resend email alerts. Server-side only: RESEND_API_KEY is read at
           # build time by scripts/generate-email-status.mjs and never shipped to
           # the browser (no VITE_ prefix). Sender/recipient are safe test values.
