@@ -34,6 +34,19 @@ jobs:
         run: npm run build
         working-directory: team-site
 
+      # Fail the gate before publishing. `vite build` can exit 0 while emitting
+      # nothing useful (bad base path, empty entry, misconfigured outDir), and an
+      # empty artifact would still upload and still be deployable. Asserting the
+      # expected output here means a broken build cannot become a release
+      # candidate at all, rather than failing later on the VPS.
+      - name: Verify build output before publishing
+        run: |
+          set -euo pipefail
+          test -f team-site/dist/index.html
+          test -d team-site/dist/assets
+          test -s team-site/dist/index.html
+          echo "Build output verified: $(find team-site/dist -type f | wc -l) files"
+
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
