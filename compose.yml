@@ -1,0 +1,86 @@
+# T22 - Compose Runtime Service
+#
+# Runs the SHA-tagged image built by the T14 Dockerfile as a managed service.
+#
+# There are no values in this file. Everything that varies between environments
+# arrives either as an interpolated variable or through the runtime `.env`, which
+# is generated on the host at deploy time and never committed. A compose file
+# with a secret in it is a secret in git history, so this one is written so that
+# it stays publishable.
+name: ${COMPOSE_PROJECT_NAME:-deploy-sprint-thebyteforce}
+
+services:
+  team-site:
+    # Pinned to a commit SHA by the deploy, never to a moving tag. `latest`
+    # would make "which code is running?" unanswerable after the fact.
+    image: ${IMAGE_TAG:-deploy-sprint-thebyteforce:local}
+    container_name: ${SERVICE_NAME:-deploy-sprint-thebyteforce}
+
+    # Survives crashes and host reboots, but honours a deliberate `docker stop`.
+    # `always` would fight an operator who stopped the service on purpose.
+    restart: unless-stopped
+
+    # Generated on the host during deploy from GitHub Secrets. It is listed here
+    # so the service reads runtime config from one predictable place; the file
+    # itself is gitignored and must never be committed.
+    env_file:
+      - .env
+
+    ports:
+      - "${APP_PORT:-8080}:8080"
+
+    # Compose gates dependent operations on this, and `docker compose ps` reports
+    # it, so a container that starts but does not serve is visibly unhealthy
+    # rather than quietly "up". wget is busybox-provided in the alpine runtime;
+    # curl is not installed.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+    # The filesystem is immutable except for the paths nginx genuinely writes to.
+    #
+    # /var/log/nginx is deliberately NOT a tmpfs: in the nginx image those files
+    # are symlinks to /dev/stdout and /dev/stderr, and mounting over them would
+    # send the logs to a throwaway filesystem instead of `docker compose logs`.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run
+      - /var/cache/nginx
+
+    # Drop everything, then add back only what the image actually needs.
+    #
+    # The Dockerfile installs our config as conf.d/default.conf and sets no USER,
+    # so the stock /etc/nginx/nginx.conf applies: the master process starts as
+    # root, chowns its cache directories to uid 101, then drops the workers to
+    # the nginx user. That needs CHOWN, SETUID and SETGID. Dropping ALL with
+    # nothing added back makes the container fail to start with
+    #   chown("/var/cache/nginx/client_temp", 101) failed (Operation not permitted)
+    #
+    # NET_BIND_SERVICE is intentionally absent: the listener is on 8080, and a
+    # port above 1024 needs no privilege to bind.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+
+    # Without a cap, container logs grow until they fill the VPS disk - which
+    # takes the site down for a reason that has nothing to do with the site.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    labels:
+      org.opencontainers.image.title: "Deploy Sprint team site"
+      org.opencontainers.image.revision: "${GIT_COMMIT:-local}"
+      deploy-sprint.task: "T22"
