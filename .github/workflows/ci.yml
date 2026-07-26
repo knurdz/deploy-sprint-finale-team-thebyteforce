@@ -104,6 +104,11 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RESEND_FROM_EMAIL: ${{ vars.RESEND_FROM_EMAIL }}
           ALERT_RECIPIENT_EMAIL: ${{ vars.ALERT_RECIPIENT_EMAIL }}
+          # T23 - release provenance. The PR number is available directly on
+          # pull_request builds; on a push to main it is recovered from the merge
+          # commit subject, which reads "Merge pull request #N from ...".
+          RELEASE_PR_NUMBER: ${{ github.event.pull_request.number }}
+          RELEASE_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: npm run build
         working-directory: team-site
 
@@ -148,11 +153,58 @@ jobs:
           done
           echo "Client bundle leak check complete ($checked secret(s) checked)."
 
+      # T23: a manifest nobody validates is just a JSON file. Fail the build if a
+      # required field is missing, if it describes a different commit than the one
+      # being built, or if an integration secret leaked into it. The last check is
+      # what stops this document quietly becoming a leak vector as fields grow.
+      - name: Verify the release manifest
+        env:
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+          WEB3FORMS_ACCESS_KEY: ${{ secrets.WEB3FORMS_ACCESS_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          set -euo pipefail
+          manifest=team-site/dist/release-manifest.json
+          test -s "$manifest"
+
+          node -e "
+            const m = require('./team-site/dist/release-manifest.json');
+            const required = ['commit','artifact','workflowRun','pullRequest','releaseTime','publicUrl','activeConfig'];
+            const missing = required.filter((k) => !(k in m));
+            if (missing.length) {
+              console.error('missing required field(s): ' + missing.join(', '));
+              process.exit(1);
+            }
+            if (m.commit !== process.env.GITHUB_SHA) {
+              console.error('manifest commit ' + m.commit + ' does not match build ' + process.env.GITHUB_SHA);
+              process.exit(1);
+            }
+            console.log('manifest complete for ' + m.shortCommit + ', tasks: ' + m.tasks.length);
+          "
+
+          for name in OPENWEATHER_API_KEY WEB3FORMS_ACCESS_KEY RESEND_API_KEY; do
+            value="${!name:-}"
+            if [ -n "$value" ] && grep -qF -- "$value" "$manifest"; then
+              echo "::error::the value of $name appears inside the release manifest"
+              exit 1
+            fi
+          done
+          echo "no secret values present in the manifest"
+
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
           name: site-dist-${{ github.sha }}
           path: team-site/dist
+
+      # T23: also published on its own so release evidence can be fetched without
+      # downloading the whole site bundle.
+      - name: Upload release evidence manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-${{ github.sha }}
+          path: team-site/dist/release-manifest.json
+          if-no-files-found: error
 
   # Build once, deploy many: this job consumes the exact artifact produced by
   # `build` above. It never checks out source and never runs npm, so the bytes

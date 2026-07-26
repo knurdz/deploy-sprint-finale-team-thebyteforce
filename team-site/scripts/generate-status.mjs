@@ -100,6 +100,23 @@ const status = {
     health: '/health',
     status: '/status',
     featureFlags: '/config/feature-flags.json',
+    releaseManifest: '/release-manifest.json',
+  },
+
+  /**
+   * T23 - Release Evidence Manifest
+   *
+   * A public-safe subset of the full manifest. /status stays the small document
+   * you check first; /release-manifest.json carries the complete release
+   * evidence. Both are written by the same build, so they cannot disagree about
+   * which commit is running.
+   */
+  release: {
+    manifest: '/release-manifest.json',
+    commit,
+    artifact: `site-dist-${commit}`,
+    workflowRun: runId,
+    releaseTime: builtAt,
   },
 
   /**
