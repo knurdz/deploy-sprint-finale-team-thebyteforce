@@ -1,0 +1,67 @@
+# T22 - Compose Runtime Service
+#
+# Runs the SHA-tagged image built by the T14 Dockerfile as a managed service.
+#
+# There are no values in this file. Everything that varies between environments
+# arrives either as an interpolated variable or through the runtime `.env`, which
+# is generated on the host at deploy time and never committed. A compose file
+# with a secret in it is a secret in git history, so this one is written so that
+# it stays publishable.
+name: ${COMPOSE_PROJECT_NAME:-deploy-sprint-thebyteforce}
+
+services:
+  team-site:
+    # Pinned to a commit SHA by the deploy, never to a moving tag. `latest`
+    # would make "which code is running?" unanswerable after the fact.
+    image: ${IMAGE_TAG:-deploy-sprint-thebyteforce:local}
+    container_name: ${SERVICE_NAME:-deploy-sprint-thebyteforce}
+
+    # Survives crashes and host reboots, but honours a deliberate `docker stop`.
+    # `always` would fight an operator who stopped the service on purpose.
+    restart: unless-stopped
+
+    # Generated on the host during deploy from GitHub Secrets. It is listed here
+    # so the service reads runtime config from one predictable place; the file
+    # itself is gitignored and must never be committed.
+    env_file:
+      - .env
+
+    ports:
+      - "${APP_PORT:-8080}:8080"
+
+    # Compose gates dependent operations on this, and `docker compose ps` reports
+    # it, so a container that starts but does not serve is visibly unhealthy
+    # rather than quietly "up". wget is busybox-provided in the alpine runtime;
+    # curl is not installed.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+    # The image already runs nginx as an unprivileged user. These narrow what a
+    # compromise could reach: the filesystem is immutable apart from the two
+    # paths nginx genuinely writes to, no capabilities are retained, and no
+    # child process can gain privileges its parent did not have.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    # Without a cap, container logs grow until they fill the VPS disk - which
+    # takes the site down for a reason that has nothing to do with the site.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    labels:
+      org.opencontainers.image.title: "Deploy Sprint team site"
+      org.opencontainers.image.revision: "${GIT_COMMIT:-local}"
+      deploy-sprint.task: "T22"
