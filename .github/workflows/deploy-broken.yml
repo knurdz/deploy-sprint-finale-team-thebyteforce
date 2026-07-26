@@ -1,0 +1,64 @@
+name: Broken deploy rehearsal
+
+# T26 - Incident: Broken Deploy Recovery
+#
+# Organizer-seeded failing deploy, repaired. Kept under its original name so the
+# failing run and the fixed run sit in the same workflow's history and can be
+# compared directly.
+#
+# Two faults, both of which only bite AFTER a green build - the kind that reach
+# production because everything upstream looked fine:
+#
+#   1. `npm ci` ran at the repository root. There is no lockfile there; the root
+#      package.json only delegates to team-site/. `npm ci` requires a lockfile,
+#      so the job died before it ever reached the build.
+#
+#   2. The artifact upload pointed at `build`. Vite writes production output to
+#      team-site/dist. Had fault 1 not failed first, this would have uploaded an
+#      empty artifact - a deploy that "succeeds" and publishes nothing.
+#
+# The second is the more dangerous one: no error, no missing step, just an empty
+# release. That is why the fix asserts the output exists rather than trusting the
+# path.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: team-site/package-lock.json
+
+      # Fix 1: install where the lockfile actually is.
+      - run: npm ci
+        working-directory: team-site
+
+      - run: npm run build
+        working-directory: team-site
+
+      # Fix 2: assert the output exists before uploading. An empty `path:` is not
+      # an error to upload-artifact by default, so an empty release ships silently.
+      - name: Verify build output before upload
+        run: |
+          set -euo pipefail
+          test -d team-site/dist
+          test -s team-site/dist/index.html
+          echo "build output present: $(find team-site/dist -type f | wc -l) files"
+
+      - name: Upload the built output
+        uses: actions/upload-artifact@v4
+        with:
+          name: broken-deploy-output
+          # Fix 3: the real output directory, not `build`.
+          path: team-site/dist
+          if-no-files-found: error
