@@ -152,8 +152,14 @@ jobs:
           echo "GET /health -> ${body}"
           [ "$body" = "ok" ]
 
-          served="$(curl -fsS "http://127.0.0.1:${APP_PORT}/status" \
-            | sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+          # Parsed as JSON, not scraped with a regex. /status contains more than
+          # one "commit" key - the top-level release commit and the nested
+          # release.commit added by T23 - so a line-based match returns two SHAs
+          # and the comparison fails even when the service is correct. Asking for
+          # the top-level field by name is unambiguous and stays correct as more
+          # blocks are added to the document.
+          curl -fsS "http://127.0.0.1:${APP_PORT}/status" -o served-status.json
+          served="$(python3 -c 'import json; print(json.load(open("served-status.json")).get("commit",""))')"
           echo "served commit: ${served}"
           if [ "$served" != "${GITHUB_SHA}" ]; then
             echo "::error::service is serving ${served}, expected ${GITHUB_SHA}"
