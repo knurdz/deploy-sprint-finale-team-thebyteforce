@@ -13,16 +13,60 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # T12: the cache is keyed off the lockfile hash, so any dependency change
+      # invalidates it automatically. `id` is set so the cache-hit result can be
+      # reported in the run summary rather than being invisible.
       - name: Setup Node
+        id: node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: team-site/package-lock.json
 
+      # `npm ci` runs on every build, cache hit or miss. The cache only holds the
+      # npm download cache (~/.npm), never node_modules, so this stays a clean
+      # lockfile-exact install — the cache makes it faster, not weaker.
       - name: Install dependencies
         run: npm ci
         working-directory: team-site
+
+      # T12: AUDIT_POLICY=document-result. Reported, never swallowed, and never
+      # used to fail the build — a transitive advisory landing overnight must not
+      # block a release, but it must be visible in the run rather than silent.
+      - name: Audit dependencies
+        id: audit
+        working-directory: team-site
+        run: |
+          set -uo pipefail
+          if npm audit --omit=dev --audit-level=high > audit-report.txt 2>&1; then
+            result="clean (no high or critical advisories)"
+          else
+            result="findings reported - see audit step output"
+          fi
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          echo "Dependency audit: $result"
+          cat audit-report.txt
+
+      - name: Report dependency pipeline status
+        run: |
+          {
+            echo "## Dependency pipeline"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Cache key source | \`team-site/package-lock.json\` |"
+            echo "| Lockfile hash | \`${{ hashFiles('team-site/package-lock.json') }}\` |"
+            echo "| Cache hit | \`${{ steps.node.outputs.cache-hit || 'false' }}\` |"
+            echo "| Install command | \`npm ci\` (runs on hit and miss) |"
+            echo "| Audit policy | document-result (non-blocking) |"
+            echo "| Audit result | ${{ steps.audit.outputs.result }} |"
+            echo ""
+            echo "Cache invalidation: the key is derived from the hash of"
+            echo "\`team-site/package-lock.json\`. Any dependency change rewrites the"
+            echo "lockfile, which changes the hash, which misses the cache and"
+            echo "repopulates it. No manual cache busting is required."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build
         env:
