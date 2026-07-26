@@ -36,9 +36,9 @@ Use this section for short public notes and links. Full task instructions and ch
 | T04 | `task/T04-rollback-to-known-good-release` | Actions > `Rollback To Known-Good Release` | Manual `workflow_dispatch` redeploy of a known-good `release_ref` |
 | T05 | `task/T05-secret-and-config-separation` | CI run + repository settings | Public deploy label kept as configuration; private token kept as a GitHub Secret |
 | T06 | `task/T06-ci-gate-before-deployment` | CI run > `Build gate` job summary | CI gate on PRs and main: lockfile install, build, output verification, artifact upload |
-| T07 |  |  |  |
-| T08 |  |  |  |
-| T09 |  |  |  |
+| T07 | `task/T07-openweather-api-widget` | Live site widget + CI run | OpenWeather key injected at build time from the `OPENWEATHER_API_KEY` secret; never committed |
+| T08 | `task/T08-rebase-organizer-feature` | PR #11 commit history | Organizer feature branch integrated; release badge and weather widget restored after the asset branch dropped them |
+| T09 | `task/T09-conflict-merge-with-both-outcomes` | PR diff on `team-site/src/data/deadlines.ts` | Merge reported no conflict yet dropped a deadline card; both outcomes restored deliberately |
 | T10 |  |  |  |
 | T11 |  |  |  |
 | T12 |  |  |  |
@@ -104,3 +104,19 @@ to serve, so no compatibility path was broken.
 HTTPS was still pending at the time of writing: the deployer enables TLS for the
 assigned domain on the first deploy after the records are applied. Teams have no
 DNS or VPS access, so this step is organizer-side.
+
+### T09 - Conflict Merge With Both Outcomes
+
+The organizer branch `task-assets/conflict-merge` rewrites the first entry of
+`team-site/src/data/deadlines.ts`, replacing the repo setup checkpoint with a
+merge conflict lab.
+
+Git reports **no conflict** when that branch is merged: its merge base is the
+current tip of `main`, and `main` has not touched the file since, so the
+rewrite applies cleanly and silently discards the existing card. The conflict is
+semantic rather than textual - two branches each claim the same slot in the
+`deadlineCards` array - so preserving both outcomes had to be done by hand.
+
+Resolution keeps both cards, ordered chronologically to match the order
+`DeadlineBoard` renders them in. Both `id` values are unchanged, so React keys
+stay stable and nothing referencing either id breaks.
