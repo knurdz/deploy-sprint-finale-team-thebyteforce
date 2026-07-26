@@ -13,6 +13,7 @@ import { CourseCard } from './components/CourseCard';
 import { DeadlineBoard } from './components/DeadlineBoard';
 import { ReleaseBadge } from './components/ReleaseBadge';
 import { StatCard } from './components/StatCard';
+import { WeatherWidget } from './components/WeatherWidget';
 import { courses } from './data/courses';
 import { deadlineCards } from './data/deadlines';
 import { sprintStats } from './data/stats';
@@ -59,6 +60,7 @@ export function App() {
         </div>
 
         <ReleaseBadge />
+        <WeatherWidget />
       </aside>
 
       <section className="workspace">
