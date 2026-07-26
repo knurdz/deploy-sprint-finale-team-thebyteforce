@@ -14,6 +14,7 @@ import { ContactForm } from './components/ContactForm';
 import { DeadlineBoard } from './components/DeadlineBoard';
 import { LearningVelocity } from './components/LearningVelocity';
 import { ReleaseBadge } from './components/ReleaseBadge';
+import { ReleaseReadiness } from './components/ReleaseReadiness';
 import { StatCard } from './components/StatCard';
 import { WeatherWidget } from './components/WeatherWidget';
 import { courses } from './data/courses';
@@ -125,6 +126,7 @@ export function App() {
           <DeadlineBoard deadlines={deadlineCards} />
         </section>
 
+        <ReleaseReadiness />
         <ContactForm />
       </section>
     </main>
